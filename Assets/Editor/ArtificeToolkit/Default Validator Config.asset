@@ -17,10 +17,28 @@ MonoBehaviour:
   useCustomBatchingValue: 0
   customBatchingValue: 0
   scenesMap:
-    list: []
+    list:
+    - Key: SampleScene
+      Value: 1
   validatorTypesMap:
-    list: []
+    list:
+    - Key: Artifice_ValidatorModule_NullScriptChecker_GameObjects
+      Value: 1
+    - Key: Artifice_ValidatorModule_ScriptableObject_NullReferenceChecker
+      Value: 1
+    - Key: Artifice_ValidatorModule_ScriptableObject_CustomAttributeChecker
+      Value: 1
+    - Key: Artifice_ValidatorModule_IsArtificeEnabled
+      Value: 1
+    - Key: Artifice_ValidatorModule_CustomAttributeChecker
+      Value: 1
   logTypesMap:
-    list: []
+    list:
+    - Key: 3
+      Value: 1
+    - Key: 2
+      Value: 1
+    - Key: 0
+      Value: 1
   assetPathsMap:
     list: []
