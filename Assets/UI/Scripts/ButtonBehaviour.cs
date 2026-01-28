@@ -31,7 +31,6 @@ public class ButtonBehaviour : MonoBehaviour
     private void Awake()
     {
         _buttonText = GetComponentInChildren<TMP_Text>();
-        _outline = GetComponentInChildren<Image>();
         _button = GetComponent<Button>();
         _button.onClick.AddListener(OnButtonSelectChanged);
     }

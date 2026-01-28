@@ -205,8 +205,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _selectedColor: {r: 0.9960785, g: 0.098039225, b: 0.5921569, a: 1}
   _defaultColor: {r: 0, g: 0, b: 0, a: 1}
-  _buttonText: {fileID: 0}
-  _outline: {fileID: 0}
+  _buttonText: {fileID: 278088037084111659}
+  _outline: {fileID: 1309961878378481787}
   OnButtonClicked:
     m_PersistentCalls:
       m_Calls: []
