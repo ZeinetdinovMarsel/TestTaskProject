@@ -20,14 +20,17 @@ public abstract class PopupBehaviour : MonoBehaviour
     }
     private void AnimateAppearing(CanvasGroup targetPopupCG, bool hide)
     {
-        _appearingSequence.Complete();
+        _appearingSequence.Stop();
+        Tween.StopAll(transform);
+        Tween.StopAll(targetPopupCG);
+
         var startValue = hide ? 1 : 0;
         var endValue = hide ? 0 : 1;
 
-        var duration = 1f;
+        var duration = 0.5f;
         _appearingSequence = Sequence.Create()
             .Group(Tween.Scale(transform, startValue, endValue, duration, Ease.OutBack))
-            .Group(Tween.Alpha(targetPopupCG, startValue, endValue, duration))
+            .Group(Tween.Alpha(targetPopupCG, startValue, endValue, duration, Ease.OutExpo))
             .OnComplete(() =>
             {
                 if (hide) targetPopupCG.gameObject.SetActive(false);
