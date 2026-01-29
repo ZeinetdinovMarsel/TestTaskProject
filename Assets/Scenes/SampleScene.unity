@@ -4088,6 +4088,7 @@ MonoBehaviour:
   _cellPrefab: {fileID: 8204606778035941357, guid: 9803c5989e4734147b7b5897cecbae8f, type: 3}
   _fadeDuration: 0.25
   _filterMode: 0
+  _serverImageCount: 66
 --- !u!1001 &1316401548
 PrefabInstance:
   m_ObjectHideFlags: 0

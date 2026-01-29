@@ -107,6 +107,7 @@ MonoBehaviour:
   _canvasGroup: {fileID: 5988853619352113395}
   _loadingImage: {fileID: 9206670556303929284}
   _idText: {fileID: 2975389763577380421}
+  _id: 0
 --- !u!1 &2556674379086675534
 GameObject:
   m_ObjectHideFlags: 0
@@ -382,7 +383,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_Sprite: {fileID: 463276712, guid: a5b940996d3e06741876d8d1c8c443d4, type: 3}
+  m_Sprite: {fileID: 0}
   m_Type: 1
   m_PreserveAspect: 0
   m_FillCenter: 1

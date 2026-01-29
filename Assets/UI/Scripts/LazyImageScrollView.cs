@@ -20,11 +20,10 @@ public class LazyImageScrollView : MonoBehaviour
     [SerializeField] private ArtCell _cellPrefab;
     [SerializeField] private float _fadeDuration = 0.25f;
     [SerializeField] private FilterMode _filterMode = FilterMode.All;
-    [SerializeField] private int _serverImageCount=66;
-    private List<int> _filteredIndices = new();
+    [SerializeField] private int _serverImageCount = 66;
     private ObjectPool<ArtCell> _cellPool;
-    private readonly List<ArtCell> _activeCells = new();
-    private List<ArtCell> _visibleCells = new();
+    [SerializeField] private List<ArtCell> _activeCells = new();
+    [SerializeField] private List<ArtCell> _visibleCells = new();
 
     private readonly string _serverUrl = "https://data.ikppbb.com/test-task-unity-data/pics/";
     private float _prevScrollY;
@@ -155,6 +154,11 @@ public class LazyImageScrollView : MonoBehaviour
             if (isVisible)
                 _visibleCells.Add(cell);
         }
+        Canvas.ForceUpdateCanvases();
+        if (_visibleCells.Count > 0)
+        {
+            _lowestCoord = _visibleCells[Mathf.Clamp(_visibleCells.Count - 3, 0, _visibleCells.Count)].Rect.position.y;
+        }
     }
 
 
@@ -163,7 +167,7 @@ public class LazyImageScrollView : MonoBehaviour
 
     private void UpdateVisible()
     {
-        if (_filteredIndices == null) return;
+        _viewportWorldMin = _viewport.TransformPoint(new Vector3(0, _viewport.rect.yMin, 0)).y;
 
         var viewportLocalPos = _content.InverseTransformPoint(_viewport.position);
         var viewportRect = new Rect(
@@ -173,42 +177,66 @@ public class LazyImageScrollView : MonoBehaviour
             _viewport.rect.height
         );
 
-        for (int i = 0; i < _activeCells.Count; i++)
+        for (int i = 0, j = 0; i < _activeCells.Count; i++)
         {
-            _activeCells[i].IdText.text = i.ToString();
+            _activeCells[i].IdText.text = _activeCells[i].Id.ToString();
+            if (_visibleCells.Count > 0 && j < _visibleCells.Count)
+            {
+                if (_activeCells[i].Id == _visibleCells[j].Id)
+                {
+                    _activeCells[i].IdText.color = Color.red;
+                    j++;
+                }
+                else
+                {
+                    _activeCells[i].IdText.color = Color.black;
+                }
+            }
+            else
+            {
+                _activeCells[i].IdText.color = Color.black;
+            }
         }
 
         for (int i = 0; i < _visibleCells.Count; i++)
         {
-            UpdateVisibleCell(_visibleCells[i]);
-            if (_visibleCells[Mathf.Clamp(_visibleCells.Count - 3, 0, _visibleCells.Count)].Rect.position.y > _viewportWorldMin && _activeCells.Count < _serverImageCount)
+            var cell = _visibleCells[i];
+            UpdateVisibleCell(cell);
+            if (_lowestCoord > _viewportWorldMin && _activeCells.Count < _serverImageCount)
             {
-                var cell =_cellPool.Get();
+                _cellPool.Get();
+            }
 
+            if (cell.LoadState == CellLoadState.None)
+            {
                 LoadImageAndShowAsync(cell).Forget();
             }
 
 
         }
-
-        _viewportWorldMin = _viewport.TransformPoint(new Vector3(0, _viewport.rect.yMin, 0)).y;
         if (_visibleCells.Count > 0)
         {
             _lowestCoord = _visibleCells[Mathf.Clamp(_visibleCells.Count - 3, 0, _visibleCells.Count)].Rect.position.y;
         }
+
     }
 
 
     private async UniTaskVoid LoadImageAndShowAsync(ArtCell cell)
     {
+        if (cell.LoadState != CellLoadState.None)
+            return;
         var token = cell.Cts.Token;
         var cg = cell.CanvasGroup;
         try
         {
             cell.LoadingImage.enabled = true;
             StartLoadAnim(cell);
+            
 
-            using var req = UnityWebRequestTexture.GetTexture($"{_serverUrl}{cell.Id+1}.jpg");
+            cell.LoadState = CellLoadState.Loading;
+
+            using var req = UnityWebRequestTexture.GetTexture($"{_serverUrl}{cell.Id + 1}.jpg");
             var op = req.SendWebRequest();
             while (!op.isDone)
             {
@@ -234,13 +262,14 @@ public class LazyImageScrollView : MonoBehaviour
         {
             StopLoadAnim(cell);
             cell.LoadingImage.enabled = false;
+            cell.LoadState = CellLoadState.Loaded;
         }
     }
 
 
     private void StartLoadAnim(ArtCell cell)
     {
-        cell.LoadingImage.enabled =true;    
+        cell.LoadingImage.enabled = true;
         Tween.LocalEulerAngles(cell.LoadingImage.transform, Vector3.zero, new Vector3(0, 0, -360), 2f, Ease.Linear, -1);
     }
 

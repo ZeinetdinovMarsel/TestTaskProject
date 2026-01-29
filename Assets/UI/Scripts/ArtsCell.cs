@@ -18,6 +18,7 @@ public class ArtCell : MonoBehaviour
     public Image LoadingImage => _loadingImage;
     public TMP_Text IdText => _idText;
     public CancellationTokenSource Cts=>_cts;
+    public CellLoadState LoadState { get; set; } = CellLoadState.None;
 
     private void Awake()
     {
@@ -49,4 +50,10 @@ public class ArtCell : MonoBehaviour
         if (_loadingImage != null) _loadingImage.enabled = false;
         gameObject.SetActive(true);
     }
+}
+public enum CellLoadState
+{
+    None,
+    Loading,
+    Loaded
 }
