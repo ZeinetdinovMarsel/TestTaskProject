@@ -20,6 +20,8 @@ MonoBehaviour:
     list:
     - Key: SampleScene
       Value: 1
+    - Key: TestTaskScene
+      Value: 1
   validatorTypesMap:
     list:
     - Key: Artifice_ValidatorModule_NullScriptChecker_GameObjects

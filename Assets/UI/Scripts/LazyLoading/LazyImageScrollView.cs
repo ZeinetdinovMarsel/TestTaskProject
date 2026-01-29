@@ -33,6 +33,8 @@ public class LazyImageScrollView : MonoBehaviour
     private UniTask _updateTask;
     private bool _updateRunning => !_updateTask.Status.IsCompleted();
     private CancellationTokenSource _lifetimeCts;
+    private CancellationTokenSource _updateCts;
+
 
     private int _bonusLoadCells = 2;
 
@@ -40,6 +42,7 @@ public class LazyImageScrollView : MonoBehaviour
     private void Awake()
     {
         _lifetimeCts = new CancellationTokenSource();
+        _updateCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
         InitializeImagePool();
         _loadingCircle = GetComponentInChildren<LoadingCircle>();
     }
@@ -60,6 +63,10 @@ public class LazyImageScrollView : MonoBehaviour
         _lifetimeCts.Cancel();
         _lifetimeCts.Dispose();
         _lifetimeCts = null;
+
+        _updateCts?.Cancel();
+        _updateCts?.Dispose();
+        _updateCts = null;
     }
 
     private void Start()
@@ -103,7 +110,12 @@ public class LazyImageScrollView : MonoBehaviour
 
         if (FilterCondition(_filterMode, id))
         {
-            _visibleCells.Add(cell);
+            if (!_visibleCells.Contains(cell))
+                _visibleCells.Add(cell);
+            else
+                _visibleCells[id].gameObject.SetActive(true);
+
+            
 
             int visibleIndex = _visibleCells.Count - 1;
             if (cell.PopupBehaviour != null)
@@ -112,6 +124,10 @@ public class LazyImageScrollView : MonoBehaviour
                     ? ArtCellType.Premium
                     : ArtCellType.Default;
             }
+        }
+        else
+        {
+            cell.gameObject.SetActive(false);
         }
 
         return cell;
@@ -147,6 +163,13 @@ public class LazyImageScrollView : MonoBehaviour
 
     public void UpdateVisibleCell(ArtCell cell)
     {
+        if (!FilterCondition(_filterMode, cell.Id))
+    {
+        cell.SetVisible(false, _fadeDuration);
+        return;
+    }
+
+
         cell.Rect.GetWorldCorners(_corners);
 
         float minY = _corners[0].y;
@@ -162,8 +185,8 @@ public class LazyImageScrollView : MonoBehaviour
 
     private void TryUpdateVisible()
     {
-        if (_updateRunning || _lifetimeCts.IsCancellationRequested) return;
-        _updateTask = UpdateVisible(_lifetimeCts.Token);
+        if (_updateRunning || _updateCts.IsCancellationRequested) return;
+        _updateTask = UpdateVisible(_updateCts.Token);
     }
 
     private async UniTask UpdateVisible(CancellationToken token)
@@ -244,13 +267,15 @@ public class LazyImageScrollView : MonoBehaviour
             return;
 
         cell.BeginLoad();
-
-        using var req = UnityWebRequestTexture.GetTexture($"{_serverUrl}{cell.Id}.jpg");
+        int expectedId = cell.Id;
+        using var req = UnityWebRequestTexture.GetTexture($"{_serverUrl}{expectedId}.jpg");
         await req.SendWebRequest();
 
         if (req.result != UnityWebRequest.Result.Success || cell.Token.IsCancellationRequested)
             return;
 
+        if (cell.Id != expectedId)
+            return;
         var tex = ((DownloadHandlerTexture)req.downloadHandler).texture;
         cell.SetSprite(tex, _fadeDuration);
     }
@@ -259,11 +284,20 @@ public class LazyImageScrollView : MonoBehaviour
     {
         _filterMode = mode;
         ApplyFilter(mode);
-        UniTask.DelayFrame(1).ContinueWith(() =>
+        UniTask.DelayFrame(1).ContinueWith(async () =>
         {
-            TryUpdateVisible();
+            await RestartUpdateTask();
         }).Forget();
     }
+    private async UniTask RestartUpdateTask()
+    {
+        _updateCts?.Cancel();
+        var isCanceled = await _updateTask.SuppressCancellationThrow();
+        _updateCts?.Dispose();
+        _updateCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
+        _updateTask = UpdateVisible(_updateCts.Token);
+    }
+
 
     public void ShowEvenOnly() => SetFilter(FilterMode.Even);
     public void ShowOddOnly() => SetFilter(FilterMode.Odd);

@@ -622,7 +622,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   _carouselAudioSource: {fileID: 50693873}
   _buttonsAudioSource: {fileID: 574026781}
-  _otherAudioSource: {fileID: 2006320787}
 --- !u!1 &310053852
 GameObject:
   m_ObjectHideFlags: 0
