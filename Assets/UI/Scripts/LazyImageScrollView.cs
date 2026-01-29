@@ -1,13 +1,11 @@
 using Cysharp.Threading.Tasks;
-using PrimeTween;
-using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.Pool;
 using UnityEngine.UI;
+using Zenject;
 
 public enum FilterMode { All, Even, Odd }
 
@@ -20,271 +18,249 @@ public class LazyImageScrollView : MonoBehaviour
     [SerializeField] private ArtCell _cellPrefab;
     [SerializeField] private float _fadeDuration = 0.25f;
     [SerializeField] private FilterMode _filterMode = FilterMode.All;
-    [SerializeField] private int _serverImageCount = 66;
+    private LoadingCircle _loadingCircle;
+    [Inject] private DiContainer _container;
+
     private ObjectPool<ArtCell> _cellPool;
-    [SerializeField] private List<ArtCell> _activeCells = new();
-    [SerializeField] private List<ArtCell> _visibleCells = new();
+    private readonly List<ArtCell> _activeCells = new();
+    private readonly List<ArtCell> _visibleCells = new();
 
     private readonly string _serverUrl = "https://data.ikppbb.com/test-task-unity-data/pics/";
-    private float _prevScrollY;
+    private static readonly Vector3[] _corners = new Vector3[4];
+    private float _viewportWorldMin => _viewport.TransformPoint(new Vector3(0, _viewport.rect.yMin, 0)).y;
+    private float _viewportWorldMax => _viewport.TransformPoint(new Vector3(0, _viewport.rect.yMax, 0)).y;
+    private float _contentWorldMin => _content.TransformPoint(new Vector3(0, _content.rect.yMin, 0)).y;
+    private UniTask _updateTask;
+    private bool _updateRunning => !_updateTask.Status.IsCompleted();
+    private CancellationTokenSource _lifetimeCts;
 
-    [SerializeField] private float _viewportWorldMin;
-    [SerializeField] private float _lowestCoord;
-
-
-
+    private int _bonusLoadCells = 2;
     private void Awake()
     {
+        _lifetimeCts = new CancellationTokenSource();
         InitializeImagePool();
+        _loadingCircle = GetComponentInChildren<LoadingCircle>();
+    }
+    private void OnDisable()
+    {
+        CancelTasks();
+    }
 
-        SetData();
-        _prevScrollY = _scrollRect.verticalNormalizedPosition;
-        _scrollRect.onValueChanged.AddListener(OnScrollValueChanged);
+    private void OnDestroy()
+    {
+        CancelTasks();
+    }
 
+    private void CancelTasks()
+    {
+        if (_lifetimeCts == null) return;
+
+        _lifetimeCts.Cancel();
+        _lifetimeCts.Dispose();
+        _lifetimeCts = null;
     }
 
     private void Start()
     {
         SetInitialArts();
-        UpdateVisible();
+        _scrollRect.onValueChanged.AddListener(OnScrollValueChanged);
     }
 
     private void OnScrollValueChanged(Vector2 pos)
     {
-        float delta = pos.y - _prevScrollY;
-
-        if (Mathf.Abs(delta) < 0.0001f) return;
-
-
-        UpdateVisible();
-
-
-        _prevScrollY = pos.y;
+        TryUpdateVisible();
+        UpdateVisibleCells();
     }
 
     private void SetInitialArts()
     {
         UniTask.DelayFrame(1).ContinueWith(() =>
         {
-            float viewportHeight = _viewport.rect.height;
-            float cellHeight = _gridLayout.cellSize.y + _gridLayout.spacing.y;
-            int visibleRows = Mathf.CeilToInt(viewportHeight / cellHeight) + 1;
-
-            for (int i = 0; i < visibleRows * _gridLayout.constraintCount; i++)
-            {
-                var cell = _cellPool.Get();
-                cell.IdText.text = i.ToString();
-
-                LoadImageAndShowAsync(cell).Forget();
-            }
-            ApplyFilter();
+            TryUpdateVisible();
         }).Forget();
-
-
     }
 
     private void InitializeImagePool()
     {
         _cellPool = new ObjectPool<ArtCell>(
-            () => Instantiate(_cellPrefab, _content),
-            cell =>
-            {
-                cell.gameObject.SetActive(true);
-                cell.CanvasGroup.alpha = 0;
-
-                cell.ArtImage.color = Color.white;
-                cell.LoadingImage.enabled = false;
-                UniTask.DelayFrame(1).ContinueWith(() =>
-                {
-                    UpdateVisibleCell(cell);
-
-                }).Forget();
-                _activeCells.Add(cell);
-                ApplyFilter();
-            },
-            cell => cell.gameObject.SetActive(false),
-            defaultCapacity: 10
-
+            () => _container.InstantiatePrefabForComponent<ArtCell>(_cellPrefab, _content),
+            cell => cell.ResetForReuse(),
+            cell => cell.gameObject.SetActive(false)
         );
+
     }
+
+    private ArtCell GetArtCellFromPool(int id)
+    {
+        id++;
+        var cell = _cellPool.Get();
+        cell.Setup(id);
+
+        _activeCells.Add(cell);
+
+
+        if (FilterCondition(_filterMode, id))
+        {
+            _visibleCells.Add(cell);
+
+            int visibleIndex = _visibleCells.Count - 1;
+            if (cell.PopupBehaviour != null)
+            {
+                cell.PopupBehaviour.ArtCellType = ((visibleIndex + 1) % 4 == 0)
+                    ? ArtCellType.Premium
+                    : ArtCellType.Default;
+            }
+        }
+
+        return cell;
+    }
+
+    private void ApplyFilter(FilterMode filter)
+    {
+        _filterMode = filter;
+        _visibleCells.Clear();
+
+        foreach (var cell in _activeCells)
+        {
+            bool visible = FilterCondition(filter, cell.Id);
+            cell.gameObject.SetActive(visible);
+            if (visible) _visibleCells.Add(cell);
+        }
+        for (int i = 0; i < _visibleCells.Count; i++)
+        {
+            var artCell = _visibleCells[i];
+            if (artCell.PopupBehaviour != null)
+            {
+                artCell.PopupBehaviour.ArtCellType = ((i + 1) % 4 == 0)
+                    ? ArtCellType.Premium
+                    : ArtCellType.Default;
+            }
+        }
+    }
+
+    private bool FilterCondition(FilterMode filter, int id) =>
+                (filter == FilterMode.All ||
+                (filter == FilterMode.Even && id % 2 == 0) ||
+                (filter == FilterMode.Odd && id % 2 != 0));
 
     public void UpdateVisibleCell(ArtCell cell)
     {
-        if (cell.Rect.position.y >= _viewportWorldMin && cell.CanvasGroup.alpha == 0)
-        {
-            cell.gameObject.SetActive(true);
-            Tween.Alpha(cell.CanvasGroup, 0f, 1f, _fadeDuration, Ease.InQuad);
-        }
-        else if (cell.Rect.position.y < _viewportWorldMin && cell.CanvasGroup.alpha == 1)
-        {
-            Tween.Alpha(cell.CanvasGroup, 1f, 0f, _fadeDuration, Ease.InQuad)
-                .OnComplete(() => cell.gameObject.SetActive(false));
-        }
+        cell.Rect.GetWorldCorners(_corners);
 
+        float minY = _corners[0].y;
+        float maxY = _corners[1].y;
 
+        bool shouldBeVisible =
+            maxY > _viewportWorldMin &&
+            minY < _viewportWorldMax;
 
+        cell.SetVisible(shouldBeVisible, _fadeDuration);
+        if (shouldBeVisible) { LoadImage(cell).Forget(); }
     }
 
-    public void SetData(FilterMode filterMode = FilterMode.All)
+    private void TryUpdateVisible()
     {
-        _filterMode = filterMode;
-        ApplyFilter();
-        UpdateVisible();
+        if (_updateRunning || _lifetimeCts.IsCancellationRequested) return;
+        _updateTask = UpdateVisible(_lifetimeCts.Token);
     }
 
-    private void ApplyFilter()
+    private async UniTask UpdateVisible(CancellationToken token)
     {
-        _visibleCells.Clear();
+        await UniTask.WaitForEndOfFrame(this, token);
 
-        for (int i = 0; i < _activeCells.Count; i++)
-        {
-            var cell = _activeCells[i];
-            cell.Id = i;
+        if (token.IsCancellationRequested) return;
 
-            bool isVisible = _filterMode switch
-            {
-                FilterMode.All => true,
-                FilterMode.Even => i % 2 == 0,
-                FilterMode.Odd => i % 2 != 0,
-                _ => true
-            };
-
-            cell.gameObject.SetActive(isVisible);
-
-            if (isVisible)
-                _visibleCells.Add(cell);
-        }
-        Canvas.ForceUpdateCanvases();
-        if (_visibleCells.Count > 0)
-        {
-            _lowestCoord = _visibleCells[Mathf.Clamp(_visibleCells.Count - 3, 0, _visibleCells.Count)].Rect.position.y;
-        }
+        if (!token.IsCancellationRequested &&
+               NeedMoreCells()) 
+            await EnsureEnoughCells(token);
+        else
+            UpdateVisibleCells();
     }
-
-
-
-
-
-    private void UpdateVisible()
+    private void UpdateVisibleCells()
     {
-        _viewportWorldMin = _viewport.TransformPoint(new Vector3(0, _viewport.rect.yMin, 0)).y;
-
-        var viewportLocalPos = _content.InverseTransformPoint(_viewport.position);
-        var viewportRect = new Rect(
-            -_viewport.rect.width * 0.5f,
-            -viewportLocalPos.y - _viewport.rect.height * 0.5f,
-            _viewport.rect.width,
-            _viewport.rect.height
-        );
-
-        for (int i = 0, j = 0; i < _activeCells.Count; i++)
+        foreach (var cell in _visibleCells)
         {
-            _activeCells[i].IdText.text = _activeCells[i].Id.ToString();
-            if (_visibleCells.Count > 0 && j < _visibleCells.Count)
-            {
-                if (_activeCells[i].Id == _visibleCells[j].Id)
-                {
-                    _activeCells[i].IdText.color = Color.red;
-                    j++;
-                }
-                else
-                {
-                    _activeCells[i].IdText.color = Color.black;
-                }
-            }
-            else
-            {
-                _activeCells[i].IdText.color = Color.black;
-            }
-        }
-
-        for (int i = 0; i < _visibleCells.Count; i++)
-        {
-            var cell = _visibleCells[i];
             UpdateVisibleCell(cell);
-            if (_lowestCoord > _viewportWorldMin && _activeCells.Count < _serverImageCount)
-            {
-                _cellPool.Get();
-            }
-
-            if (cell.LoadState == CellLoadState.None)
-            {
-                LoadImageAndShowAsync(cell).Forget();
-            }
-
-
         }
-        if (_visibleCells.Count > 0)
-        {
-            _lowestCoord = _visibleCells[Mathf.Clamp(_visibleCells.Count - 3, 0, _visibleCells.Count)].Rect.position.y;
-        }
+    }
+    private bool NeedMoreCells()
+    {
+        if (_visibleCells.Count == 0 && _activeCells.Count == 0)
+            return true;
 
+        ArtCell lastCell =
+            _visibleCells.Count > 0
+                ? _visibleCells[^1]
+                : _activeCells[^1];
+
+        lastCell.Rect.GetWorldCorners(_corners);
+
+        float lastCellWorldMinY = _corners[0].y;
+
+        float preloadOffset =
+            _gridLayout.cellSize.y * _bonusLoadCells;
+
+        return lastCellWorldMinY + preloadOffset > _viewportWorldMin;
     }
 
+    private async UniTask EnsureEnoughCells(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested &&
+               NeedMoreCells())
+        {
+            int nextId = _activeCells.Count;
 
-    private async UniTaskVoid LoadImageAndShowAsync(ArtCell cell)
+            if (!await CheckImageExists(nextId + 1, token))
+                break;
+
+            var cell = GetArtCellFromPool(nextId);
+
+            await UniTask.DelayFrame(1, cancellationToken: token);
+            UpdateVisibleCell(cell);
+        }
+    }
+
+    private async UniTask<bool> CheckImageExists(int id, CancellationToken token)
+    {
+        using var headReq = UnityWebRequest.Head($"{_serverUrl}{id}.jpg");
+        try
+        {
+            _loadingCircle.StartLoadAnim();
+            await headReq.SendWebRequest().WithCancellation(token);
+            _loadingCircle.StopLoadAnim();
+            return headReq.result == UnityWebRequest.Result.Success;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async UniTaskVoid LoadImage(ArtCell cell)
     {
         if (cell.LoadState != CellLoadState.None)
             return;
-        var token = cell.Cts.Token;
-        var cg = cell.CanvasGroup;
-        try
-        {
-            cell.LoadingImage.enabled = true;
-            StartLoadAnim(cell);
-            
 
-            cell.LoadState = CellLoadState.Loading;
+        cell.BeginLoad();
 
-            using var req = UnityWebRequestTexture.GetTexture($"{_serverUrl}{cell.Id + 1}.jpg");
-            var op = req.SendWebRequest();
-            while (!op.isDone)
-            {
-                if (token.IsCancellationRequested) { req.Abort(); return; }
-                await UniTask.Yield();
-            }
+        using var req = UnityWebRequestTexture.GetTexture($"{_serverUrl}{cell.Id}.jpg");
+        await req.SendWebRequest();
 
-            if (req.result != UnityWebRequest.Result.Success) return;
+        if (req.result != UnityWebRequest.Result.Success || cell.Token.IsCancellationRequested)
+            return;
 
-            var tex = ((DownloadHandlerTexture)req.downloadHandler).texture;
-            if (tex == null) return;
-
-            var sprite = Sprite.Create(tex, new Rect(0, 0, tex.width, tex.height), new Vector2(0.5f, 0.5f), 100f);
-            if (token.IsCancellationRequested) return;
-
-            cell.ArtImage.sprite = sprite;
-            cell.ArtImage.color = Color.white;
-            await Tween.Alpha(cg, 0f, 1f, _fadeDuration, Ease.InQuad).ToUniTask(cancellationToken: token);
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception) { }
-        finally
-        {
-            StopLoadAnim(cell);
-            cell.LoadingImage.enabled = false;
-            cell.LoadState = CellLoadState.Loaded;
-        }
+        var tex = ((DownloadHandlerTexture)req.downloadHandler).texture;
+        cell.SetSprite(tex, _fadeDuration);
     }
 
-
-    private void StartLoadAnim(ArtCell cell)
+    public void SetFilter(FilterMode mode = FilterMode.All)
     {
-        cell.LoadingImage.enabled = true;
-        Tween.LocalEulerAngles(cell.LoadingImage.transform, Vector3.zero, new Vector3(0, 0, -360), 2f, Ease.Linear, -1);
-    }
-
-    private void StopLoadAnim(ArtCell cell)
-    {
-        cell.LoadingImage.enabled = false;
-        Tween.StopAll(cell.transform);
-    }
-
-    public void SetFilter(FilterMode mode)
-    {
-        if (_filterMode == mode) return;
         _filterMode = mode;
-        ApplyFilter();
-        UpdateVisible();
+        ApplyFilter(mode);
+        UniTask.DelayFrame(1).ContinueWith(() =>
+        {
+            TryUpdateVisible();
+        }).Forget();
     }
 
     public void ShowEvenOnly() => SetFilter(FilterMode.Even);
