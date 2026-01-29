@@ -2,6 +2,7 @@ using Cysharp.Threading.Tasks;
 using System.Collections.Generic;
 using System.Threading;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.Networking;
 using UnityEngine.Pool;
 using UnityEngine.UI;
@@ -29,12 +30,13 @@ public class LazyImageScrollView : MonoBehaviour
     private static readonly Vector3[] _corners = new Vector3[4];
     private float _viewportWorldMin => _viewport.TransformPoint(new Vector3(0, _viewport.rect.yMin, 0)).y;
     private float _viewportWorldMax => _viewport.TransformPoint(new Vector3(0, _viewport.rect.yMax, 0)).y;
-    private float _contentWorldMin => _content.TransformPoint(new Vector3(0, _content.rect.yMin, 0)).y;
     private UniTask _updateTask;
     private bool _updateRunning => !_updateTask.Status.IsCompleted();
     private CancellationTokenSource _lifetimeCts;
 
     private int _bonusLoadCells = 2;
+
+    public UnityEvent OnCellInstatiated = new();
     private void Awake()
     {
         _lifetimeCts = new CancellationTokenSource();
@@ -155,7 +157,7 @@ public class LazyImageScrollView : MonoBehaviour
             minY < _viewportWorldMax;
 
         cell.SetVisible(shouldBeVisible, _fadeDuration);
-        if (shouldBeVisible) { LoadImage(cell).Forget(); }
+        if (shouldBeVisible) { LoadImage(cell).Forget(); OnCellInstatiated?.Invoke(); }
     }
 
     private void TryUpdateVisible()
@@ -171,7 +173,7 @@ public class LazyImageScrollView : MonoBehaviour
         if (token.IsCancellationRequested) return;
 
         if (!token.IsCancellationRequested &&
-               NeedMoreCells()) 
+               NeedMoreCells())
             await EnsureEnoughCells(token);
         else
             UpdateVisibleCells();

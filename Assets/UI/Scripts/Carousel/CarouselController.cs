@@ -27,6 +27,8 @@ public class CarouselController : MonoBehaviour, IBeginDragHandler, IDragHandler
     private float _lastPointerTime;
     private List<RectTransform> _panelRects;
 
+    public CarouselLogic Logic=>_logic;
+
     private void Awake()
     {
         if (_viewport == null) _viewport = (RectTransform)transform;
